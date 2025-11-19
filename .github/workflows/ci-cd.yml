@@ -1,0 +1,69 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Install and build client
+      - name: Install client dependencies
+        working-directory: ./client
+        run: npm ci
+
+      - name: Build client (fails if errors)
+        working-directory: ./client
+        run: npm run build
+
+      # Install server (no build needed, but we can test connection string format)
+      - name: Install server dependencies
+        working-directory: ./server
+        run: npm ci
+
+  # ──────────────────────────────
+  # Deploy Backend to Render (only on main)
+  # ──────────────────────────────
+  deploy-backend:
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys"
+
+  # ──────────────────────────────
+  # Deploy Frontend to Vercel (only on main)
+  # ──────────────────────────────
+  deploy-frontend:
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: ./client
+          # Remove the wrong "scope" line completely, or use correct one only if you have a team
+          # scope: my-team-name   # ← delete or fix only if you really have a Vercel team
